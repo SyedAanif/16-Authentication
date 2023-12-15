@@ -1,17 +1,31 @@
+// for getting access to environment variables, add it as early as possible in the file
+// add ".env" file at the root of the project, with the variable-names (NAME=VALUE)
+import "dotenv/config";
+
 import bodyParser from "body-parser";
 import express from "express";
 import pg from "pg";
 
-const PORT = 3000;
+// const PORT = 3000;
+const PORT = process.env.PORT;
 
 const app = express();
 
+// const db = new pg.Client({
+//   host: "localhost",
+//   port: 5432,
+//   user: "postgres",
+//   password: "password",
+//   database: "userDB",
+// });
+
+// access ENV variables
 const db = new pg.Client({
-  host: "localhost",
-  port: 5432,
-  user: "postgres",
-  password: "password",
-  database: "userDB",
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
 });
 
 db.connect();
@@ -20,6 +34,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
 app.get("/", (req, res) => {
+  console.log(process.env.SECRET); // just for test
   res.render("home.ejs");
 });
 
