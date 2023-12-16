@@ -6,6 +6,9 @@ import bodyParser from "body-parser";
 import express from "express";
 import pg from "pg";
 
+// Hashing function
+import md5 from "md5";
+
 // const PORT = 3000;
 const PORT = process.env.PORT;
 
@@ -48,10 +51,13 @@ app.get("/register", (req, res) => {
 
 // Register a new user
 app.post("/register", async (req, res) => {
+  const password = req.body["password"];
+  // Hash the password 
+  const passwordHash = md5(password);
   try {
     await db.query("INSERT INTO users (email, password) VALUES ($1, $2)", [
       req.body["username"],
-      req.body["password"],
+      passwordHash,
     ]);
     // only registered users can access secrets
     res.render("secrets.ejs");
@@ -62,17 +68,20 @@ app.post("/register", async (req, res) => {
 
 // Login a registered user
 app.post("/login", async (req, res) => {
+  const password = req.body["password"];
+  const passwordHash = md5(password);
   try {
     const result = await db.query(
       "SELECT * FROM users where email = $1 AND password = $2",
-      [req.body["username"], req.body["password"]]
+      [req.body["username"], passwordHash]
     );
     if (result.rows.length) {
       // only logged in users can access secrets
       res.render("secrets.ejs");
+    } else {
+      //error catching
+      res.redirect("/");
     }
-    //error catching
-    res.redirect("/");
   } catch (error) {
     console.error("Error while login", error);
   }
