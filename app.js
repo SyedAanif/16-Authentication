@@ -7,7 +7,13 @@ import express from "express";
 import pg from "pg";
 
 // Hashing function
-import md5 from "md5";
+// import md5 from "md5";
+
+// newer and robust Hashing and Salting package
+import bcrypt from "bcrypt";
+
+// number of times to salt the hash
+const SALT_ROUNDS = 10;
 
 // const PORT = 3000;
 const PORT = process.env.PORT;
@@ -52,13 +58,19 @@ app.get("/register", (req, res) => {
 // Register a new user
 app.post("/register", async (req, res) => {
   const password = req.body["password"];
-  // Hash the password 
-  const passwordHash = md5(password);
+  // Hash the password using MD5
+  // const passwordHash = md5(password);
+
   try {
-    await db.query("INSERT INTO users (email, password) VALUES ($1, $2)", [
-      req.body["username"],
-      passwordHash,
-    ]);
+    // ASYNC way to SALT and HASH
+    bcrypt.hash(password, SALT_ROUNDS, function (err, hashedPassword) {
+      // Store hash in your password DB.
+      db.query("INSERT INTO users (email, password) VALUES ($1, $2)", [
+        req.body["username"],
+        hashedPassword,
+      ]);
+    });
+
     // only registered users can access secrets
     res.render("secrets.ejs");
   } catch (error) {
@@ -69,15 +81,26 @@ app.post("/register", async (req, res) => {
 // Login a registered user
 app.post("/login", async (req, res) => {
   const password = req.body["password"];
-  const passwordHash = md5(password);
+
+  //  MD5 Hash
+  // const passwordHash = md5(password);
   try {
-    const result = await db.query(
-      "SELECT * FROM users where email = $1 AND password = $2",
-      [req.body["username"], passwordHash]
-    );
+    const result = await db.query("SELECT * FROM users where email = $1", [
+      req.body["username"],
+    ]);
     if (result.rows.length) {
-      // only logged in users can access secrets
-      res.render("secrets.ejs");
+      // Load hash from your password DB.
+      // Compare salt & hash password with plain-text password
+      bcrypt.compare(password, result.rows[0]["password"], function (err, matched) {
+          if (matched === true) {
+            // only logged in users can access secrets
+            res.render("secrets.ejs");
+          } else {
+            //error catching
+            res.redirect("/");
+          }
+        }
+      );
     } else {
       //error catching
       res.redirect("/");
