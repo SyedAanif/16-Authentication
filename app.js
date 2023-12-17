@@ -15,7 +15,10 @@ import session from "express-session";
 import passport from "passport";
 // Authentication strategy
 // https://medium.com/@prashantramnyc/node-js-with-passport-authentication-simplified-76ca65ee91e5 -- See this for more understanding
-import Strategy from "passport-local";
+// import Strategy from "passport-local";
+
+// Google OAuth2.0 Strategy for authentication adn authorization
+import { Strategy as GooogleStrategy } from "passport-google-oauth20";
 
 // Hashing function
 // import md5 from "md5";
@@ -55,7 +58,7 @@ db.connect();
 // session middleware
 app.use(
   session({
-    secret: "Our little secret.",
+    secret: process.env.SECRET,
     resave: false,
     saveUninitialized: false,
   })
@@ -66,32 +69,80 @@ app.use(passport.initialize()); // intialize on every route call
 app.use(passport.session()); // allow passport to use express-session
 
 // return the "authenticated user"
-passport.use(new Strategy(authUser));
+// passport.use(new Strategy(authUser));
 
-async function authUser(user, password, done) {
-  // done(err, auth_user) passed to serialize function
-  const result = await db.query("SELECT * FROM users WHERE email = $1", [user]);
-  if (result.rows.length == 0) {
-    return done(null, false);
-  }
+// async function authUser(user, password, done) {
+//   // done(err, auth_user) passed to serialize function
+//   const result = await db.query("SELECT * FROM users WHERE email = $1", [user]);
+//   if (result.rows.length == 0) {
+//     return done(null, false);
+//   }
 
-  if (password == result.rows[0]["password"]) {
-    // only logged in users can access secrets
-    return done(null, result.rows);
-  } else {
-    //error catching
-    return done(null, false);
-  }
-}
+//   if (password == result.rows[0]["password"]) {
+//     // only logged in users can access secrets
+//     return done(null, result.rows);
+//   } else {
+//     //error catching
+//     return done(null, false);
+//   }
+// }
+
+// Google Oauth 2.0 Strategy
+passport.use(
+  new GooogleStrategy(
+    {
+      clientID: process.env["CLIENT_ID"],
+      clientSecret: process.env.CLIENT_SECRET,
+      callbackURL: process.env.CALLBACK_URL,
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      // console.log(accessToken);
+      // console.log(refreshToken);
+      // console.log(profile);
+      // console.log(cb);
+
+      // Create or Find User in our DB
+      const account = profile._json;
+      let user = {};
+      try {
+        const currentUserQuery = await db.query(
+          "SELECT * FROM users WHERE google_id = $1",
+          [account.sub]
+        );
+        // console.log(currentUserQuery.rows)
+
+        // user not found, then create
+        if (currentUserQuery.rows.length === 0) {
+          // create user
+          await db.query("INSERT INTO users (username, google_id) VALUES ($1, $2)", [
+            account.name, account.sub,
+          ]);
+          user = {
+            username: account.name,
+          };
+        } else {
+          user = {
+            username: currentUserQuery.rows[0].username,
+          };
+        }
+        done(null, user);
+      } catch (error) {
+        done(error);
+      }
+    }
+  )
+);
 
 // attach the authenticated user to "req.session.passport.user.{..}"
 // This allows the authenticated user to be "attached" to a unique session.
 passport.serializeUser((user, done) => {
+  // loads into req.session.passport.user
   done(null, user);
 });
 
 // retrieve the authenticated user object for that session
 passport.deserializeUser((user, done) => {
+  // loads into req.user
   done(null, user);
 });
 
@@ -99,6 +150,24 @@ app.get("/", (req, res) => {
   // console.log(process.env.SECRET); // just for test
   res.render("home.ejs");
 });
+
+// Call for login with Google
+// use passport to authenticate with Google Strategy to recognise our app from above
+app.get(
+  "/auth/google",
+  passport.authenticate("google", { scope: ["profile"] })
+);
+
+// Callback URL
+app.get(
+  "/auth/google/secrets",
+  // Takes our callback, then passport decodes the "code" to be put in session
+  passport.authenticate("google", { failureRedirect: "/login" }),
+  (req, res) => {
+    // Successful authentication, redirect to secrets.
+    res.redirect("/secrets");
+  }
+);
 
 app.get("/login", (req, res) => {
   if (req.isAuthenticated()) {
