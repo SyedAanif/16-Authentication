@@ -114,15 +114,18 @@ passport.use(
         // user not found, then create
         if (currentUserQuery.rows.length === 0) {
           // create user
-          await db.query("INSERT INTO users (username, google_id) VALUES ($1, $2)", [
-            account.name, account.sub,
-          ]);
+          await db.query(
+            "INSERT INTO users (username, google_id) VALUES ($1, $2)",
+            [account.name, account.sub]
+          );
           user = {
             username: account.name,
+            id: account.sub,
           };
         } else {
           user = {
             username: currentUserQuery.rows[0].username,
+            id: currentUserQuery.rows[0].google_id,
           };
         }
         done(null, user);
@@ -185,14 +188,18 @@ app.get("/register", (req, res) => {
   }
 });
 
-app.get("/secrets", (req, res) => {
+app.get("/secrets", async (req, res) => {
   // will prevent a user from pressing the back button and seeing the dashboard page after they logout.
   res.header(
     "Cache-Control",
     "no-cache, private, no-store, must-revalidate, max-stale=0, post-check=0, pre-check=0"
   );
   if (req.isAuthenticated()) {
-    res.render("secrets.ejs");
+    const result = await db.query("SELECT * FROM secrets");
+
+    res.render("secrets.ejs", {
+      secrets: result.rows,
+    });
   } else {
     res.redirect("/login");
   }
@@ -276,6 +283,29 @@ app.post(
     failureRedirect: "/login",
   })
 );
+
+// create a secret
+app.get("/submit", (req, res) => {
+  if (req.isAuthenticated()) {
+    res.render("submit.ejs");
+  } else {
+    res.redirect("/login");
+  }
+});
+
+app.post("/submit", async (req, res) => {
+  const secret = req.body["secret"];
+  // // find authenticated user
+  // const authenticatedUser = req.user["id"];
+
+  // Persist Secret
+  try {
+    await db.query("INSERT INTO secrets (body) VALUES ($1)", [secret]);
+    res.redirect("/secrets");
+  } catch (error) {
+    console.error("Error occurred while persisting secret", error);
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server started on http://localhost:${PORT}`);

@@ -12,3 +12,8 @@ CREATE TABLE users (
     username VARCHAR(255) NOT NULL,
     google_id VARCHAR NOT NULL UNIQUE
 );
+
+CREATE TABLE secrets (
+    id SERIAL PRIMARY KEY,
+    body text NOT NULL
+);
