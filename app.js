@@ -6,19 +6,33 @@ import bodyParser from "body-parser";
 import express from "express";
 import pg from "pg";
 
+// used as a middle-ware for session-management
+import session from "express-session";
+
+// Passport is a Node authentication middleware
+// that provides over 500 authentication strategies
+// Session management- authenticated users to sessions of express-session
+import passport from "passport";
+// Authentication strategy
+// https://medium.com/@prashantramnyc/node-js-with-passport-authentication-simplified-76ca65ee91e5 -- See this for more understanding
+import Strategy from "passport-local";
+
 // Hashing function
 // import md5 from "md5";
 
 // newer and robust Hashing and Salting package
-import bcrypt from "bcrypt";
+// import bcrypt from "bcrypt";
 
 // number of times to salt the hash
-const SALT_ROUNDS = 10;
+// const SALT_ROUNDS = 10;
 
 // const PORT = 3000;
 const PORT = process.env.PORT;
 
 const app = express();
+
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static("public"));
 
 // const db = new pg.Client({
 //   host: "localhost",
@@ -27,7 +41,6 @@ const app = express();
 //   password: "password",
 //   database: "userDB",
 // });
-
 // access ENV variables
 const db = new pg.Client({
   host: process.env.DB_HOST,
@@ -39,76 +52,161 @@ const db = new pg.Client({
 
 db.connect();
 
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static("public"));
+// session middleware
+app.use(
+  session({
+    secret: "Our little secret.",
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+
+// passport authentication middleware
+app.use(passport.initialize()); // intialize on every route call
+app.use(passport.session()); // allow passport to use express-session
+
+// return the "authenticated user"
+passport.use(new Strategy(authUser));
+
+async function authUser(user, password, done) {
+  // done(err, auth_user) passed to serialize function
+  const result = await db.query("SELECT * FROM users WHERE email = $1", [user]);
+  if (result.rows.length == 0) {
+    return done(null, false);
+  }
+
+  if (password == result.rows[0]["password"]) {
+    // only logged in users can access secrets
+    return done(null, result.rows);
+  } else {
+    //error catching
+    return done(null, false);
+  }
+}
+
+// attach the authenticated user to "req.session.passport.user.{..}"
+// This allows the authenticated user to be "attached" to a unique session.
+passport.serializeUser((user, done) => {
+  done(null, user);
+});
+
+// retrieve the authenticated user object for that session
+passport.deserializeUser((user, done) => {
+  done(null, user);
+});
 
 app.get("/", (req, res) => {
-  console.log(process.env.SECRET); // just for test
+  // console.log(process.env.SECRET); // just for test
   res.render("home.ejs");
 });
 
 app.get("/login", (req, res) => {
-  res.render("login.ejs");
+  if (req.isAuthenticated()) {
+    res.render("secrets.ejs");
+  } else {
+    res.render("login.ejs");
+  }
 });
 
 app.get("/register", (req, res) => {
-  res.render("register.ejs");
+  if (req.isAuthenticated()) {
+    res.render("secrets.ejs");
+  } else {
+    res.render("register.ejs");
+  }
+});
+
+app.get("/secrets", (req, res) => {
+  // will prevent a user from pressing the back button and seeing the dashboard page after they logout.
+  res.header(
+    "Cache-Control",
+    "no-cache, private, no-store, must-revalidate, max-stale=0, post-check=0, pre-check=0"
+  );
+  if (req.isAuthenticated()) {
+    res.render("secrets.ejs");
+  } else {
+    res.redirect("/login");
+  }
+});
+
+//  clear out cookies, session data
+app.get("/logout", (req, res) => {
+  req.logout();
+  res.redirect("/");
 });
 
 // Register a new user
-app.post("/register", async (req, res) => {
-  const password = req.body["password"];
-  // Hash the password using MD5
-  // const passwordHash = md5(password);
+// app.post("/register", async (req, res) => {
+//   const password = req.body["password"];
+//   // Hash the password using MD5
+//   // const passwordHash = md5(password);
 
-  try {
-    // ASYNC way to SALT and HASH
-    bcrypt.hash(password, SALT_ROUNDS, function (err, hashedPassword) {
-      // Store hash in your password DB.
-      db.query("INSERT INTO users (email, password) VALUES ($1, $2)", [
-        req.body["username"],
-        hashedPassword,
-      ]);
-    });
+//   try {
+//     // ASYNC way to SALT and HASH
+//     bcrypt.hash(password, SALT_ROUNDS, function (err, hashedPassword) {
+//       // Store hash in your password DB.
+//       db.query("INSERT INTO users (email, password) VALUES ($1, $2)", [
+//         req.body["username"],
+//         hashedPassword,
+//       ]);
+//     });
 
-    // only registered users can access secrets
-    res.render("secrets.ejs");
-  } catch (error) {
-    console.error("Error while registering user", error);
-  }
-});
+//     // only registered users can access secrets
+//     res.render("secrets.ejs");
+//   } catch (error) {
+//     console.error("Error while registering user", error);
+//   }
+// });
+
+// passport.authenticate() as middleware on your login route
+app.post(
+  "/register",
+  passport.authenticate("local", {
+    successRedirect: "/secrets",
+    failureRedirect: "/register",
+  })
+);
 
 // Login a registered user
-app.post("/login", async (req, res) => {
-  const password = req.body["password"];
+// app.post("/login", async (req, res) => {
+//   const password = req.body["password"];
 
-  //  MD5 Hash
-  // const passwordHash = md5(password);
-  try {
-    const result = await db.query("SELECT * FROM users where email = $1", [
-      req.body["username"],
-    ]);
-    if (result.rows.length) {
-      // Load hash from your password DB.
-      // Compare salt & hash password with plain-text password
-      bcrypt.compare(password, result.rows[0]["password"], function (err, matched) {
-          if (matched === true) {
-            // only logged in users can access secrets
-            res.render("secrets.ejs");
-          } else {
-            //error catching
-            res.redirect("/");
-          }
-        }
-      );
-    } else {
-      //error catching
-      res.redirect("/");
-    }
-  } catch (error) {
-    console.error("Error while login", error);
-  }
-});
+//   //  MD5 Hash
+//   // const passwordHash = md5(password);
+//   try {
+//     const result = await db.query("SELECT * FROM users where email = $1", [
+//       req.body["username"],
+//     ]);
+//     if (result.rows.length) {
+//       // Load hash from your password DB.
+//       // Compare salt & hash password with plain-text password
+//       bcrypt.compare(password, result.rows[0]["password"], function (err, matched) {
+//           if (matched === true) {
+//             // only logged in users can access secrets
+//             res.render("secrets.ejs");
+//           } else {
+//             //error catching
+//             res.redirect("/");
+//           }
+//         }
+//       );
+//     } else {
+//       //error catching
+//       res.redirect("/");
+//     }
+//   } catch (error) {
+//     console.error("Error while login", error);
+//   }
+// });
+
+// passport.authenticate() as middleware on your login route
+app.post(
+  "/login",
+  passport.authenticate("local", {
+    successRedirect: "/secrets",
+    failureRedirect: "/login",
+  })
+);
 
 app.listen(PORT, () => {
   console.log(`Server started on http://localhost:${PORT}`);
